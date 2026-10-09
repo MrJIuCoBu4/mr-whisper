@@ -72,17 +72,19 @@ class WhisperManager {
 
   async initializeFromConfig(config = {}) {
     // An external server (tools/fw-server) runs its own model — nothing to spawn here.
+    // Only skip the local pre-warm when it actually answered: on failure fall through
+    // and warm up whisper.cpp, otherwise the first dictation pays the model load.
     if (config.whisperServerUrl) {
       try {
         await this.serverManager.connectRemote(config.whisperServerUrl);
         debugLogger.info("whisper-server: using external server", { url: config.whisperServerUrl });
+        return;
       } catch (err) {
         debugLogger.warn("External whisper-server unreachable, falling back to local", {
           url: config.whisperServerUrl,
           error: err.message,
         });
       }
-      return;
     }
 
     const modelPath = config.whisperModelPath
