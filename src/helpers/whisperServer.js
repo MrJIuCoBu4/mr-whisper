@@ -3,6 +3,7 @@ const EventEmitter = require("events");
 const fs = require("fs");
 const path = require("path");
 const http = require("http");
+const os = require("os");
 const { app } = require("electron");
 const debugLogger = require("./debugLogger");
 const { killProcess } = require("../utils/process");
@@ -23,9 +24,22 @@ function isVadActive(options = {}) {
 }
 
 function getVadSignature(options = {}) {
-  if (!isVadActive(options)) return "vad:off";
+  // Beam size and non-speech suppression end up in the server's argv as well, so a
+  // config change has to invalidate the running process — not just the VAD settings.
+  const quality = `beam:${options.beamSize ?? "default"}|nst:${options.suppressNonSpeech !== false}`;
+  if (!isVadActive(options)) return `vad:off|${quality}`;
   const vadConfig = sanitizeWhisperVadConfig(options.vadConfig || DEFAULT_WHISPER_VAD_CONFIG);
-  return `vad:on:${options.vadModelPath}:${JSON.stringify(vadConfig)}`;
+  return `vad:on:${options.vadModelPath}:${JSON.stringify(vadConfig)}|${quality}`;
+}
+
+// whisper.cpp falls back to 4 threads no matter how many cores the machine has,
+// which makes large models take tens of seconds on a 16-thread CPU. Use half of
+// the logical cores so the rest of the system stays responsive while transcribing.
+const MAX_DEFAULT_THREADS = 8;
+
+function defaultWhisperThreads() {
+  const logical = os.cpus()?.length || 4;
+  return Math.max(2, Math.min(MAX_DEFAULT_THREADS, Math.floor(logical / 2)));
 }
 
 function buildWhisperServerArgs({
@@ -33,13 +47,21 @@ function buildWhisperServerArgs({
   port,
   language,
   threads,
+  beamSize,
+  suppressNonSpeech = true,
   vadEnabled = false,
   vadModelPath = null,
   vadConfig,
 }) {
   const args = ["--model", modelPath, "--host", "127.0.0.1", "--port", String(port)];
 
-  if (threads) args.push("--threads", String(threads));
+  args.push("--threads", String(threads || defaultWhisperThreads()));
+
+  // Accuracy/cleanliness knobs. Beam search costs decoder time, which is small next to
+  // the encoder pass on these models, and non-speech token suppression keeps noise
+  // from turning into invented words.
+  if (beamSize) args.push("--beam-size", String(beamSize));
+  if (suppressNonSpeech) args.push("--suppress-nst");
 
   // whisper.cpp defaults to English when --language is omitted;
   // explicitly pass "auto" to enable language auto-detection
@@ -340,6 +362,8 @@ class WhisperServerManager extends EventEmitter {
       port: this.port,
       language: options.language,
       threads: options.threads,
+      beamSize: options.beamSize,
+      suppressNonSpeech: options.suppressNonSpeech,
       vadEnabled: options.vadEnabled === true,
       vadModelPath: options.vadModelPath || null,
       vadConfig: options.vadConfig,

@@ -13,7 +13,7 @@ const HOTKEY_REGISTRATION_DELAY_MS = 1000;
 const FALLBACK_HOTKEYS = ["F8", "F9", "Control+Shift+Space"];
 
 // Default hotkey for dictation if no saved value exists
-const DEFAULT_HOTKEY = "Control+Super";
+const DEFAULT_HOTKEY = "Alt+Z";
 
 // Slots routed through GNOME native gsettings (not globalShortcut).
 // Temporary slots like "cancel" stay on globalShortcut.
@@ -402,6 +402,20 @@ class HotkeyManager extends EventEmitter {
         return { success: true, hotkey };
       }
 
+      const activationMode = process.env.ACTIVATION_MODE || "tap";
+      if (
+        process.platform === "win32" &&
+        activationMode === "push" &&
+        hotkey.includes("+")
+      ) {
+        slot.hotkey = hotkey;
+        slot.accelerator = null;
+        debugLogger.log(
+          `[HotkeyManager] Push-to-talk compound "${hotkey}" set - using Windows native listener`
+        );
+        return { success: true, hotkey };
+      }
+
       const accelerator = normalizeToAccelerator(hotkey);
 
       const alreadyRegistered = globalShortcut.isRegistered(accelerator);
@@ -757,6 +771,7 @@ class HotkeyManager extends EventEmitter {
       const result = this.setupShortcuts(envHotkey, callback);
       if (result.success) {
         debugLogger.log(`[HotkeyManager] Hotkey "${envHotkey}" registered from env`);
+        this.emit("hotkey-loaded", this.currentHotkey);
       } else {
         debugLogger.log(`[HotkeyManager] Env hotkey "${envHotkey}" failed, waiting for page`);
         this.loadSavedHotkeyOrDefault(mainWindow, callback);

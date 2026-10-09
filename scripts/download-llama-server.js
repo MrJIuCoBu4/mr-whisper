@@ -52,6 +52,18 @@ const BINARIES = {
 
 const BIN_DIR = path.join(__dirname, "..", "resources", "bin");
 
+const DIRECT_RELEASE_FALLBACKS = {
+  "win32-x64-cpu": {
+    tag: LLAMA_CPP_TAG,
+    assets: [
+      {
+        name: `llama-${LLAMA_CPP_TAG}-bin-win-cpu-x64.zip`,
+        url: `https://github.com/ggerganov/llama.cpp/releases/download/${LLAMA_CPP_TAG}/llama-${LLAMA_CPP_TAG}-bin-win-cpu-x64.zip`,
+      },
+    ],
+  },
+};
+
 let cachedRelease = null;
 
 async function getRelease() {
@@ -167,9 +179,34 @@ function getEntriesForPlatformArch(platformArch) {
   return Object.entries(BINARIES).filter(([, config]) => config.platformArch === platformArch);
 }
 
+function getDirectReleaseFallback(platformArch) {
+  const fallback = DIRECT_RELEASE_FALLBACKS[platformArch];
+  if (!fallback) return null;
+  return { tag_name: fallback.tag, assets: fallback.assets };
+}
+
 async function main() {
   console.log(`\n[llama-server] Using pinned version: ${LLAMA_CPP_TAG}`);
-  const release = await getRelease();
+  const args = parseArgs();
+
+  if (args.isCurrent) {
+    const entries = getEntriesForPlatformArch(args.platformArch);
+    const allExist =
+      entries.length > 0 &&
+      entries.every(([, config]) => fs.existsSync(path.join(BIN_DIR, config.outputName)));
+    if (allExist && !args.isForce) {
+      console.log(`[llama-server] ${args.platformArch}: Already exists`);
+      return;
+    }
+  }
+
+  let release = await getRelease();
+  if (!release && args.isCurrent) {
+    release = getDirectReleaseFallback(`${args.platformArch}-cpu`) || getDirectReleaseFallback(args.platformArch);
+    if (release) {
+      console.warn("[llama-server] GitHub API unavailable, using direct release URL fallback");
+    }
+  }
 
   if (!release) {
     console.error(`[llama-server] Could not fetch release from ${LLAMA_CPP_REPO}`);
@@ -181,8 +218,6 @@ async function main() {
   console.log(`\nDownloading llama-server binaries (${release.tag})...\n`);
 
   fs.mkdirSync(BIN_DIR, { recursive: true });
-
-  const args = parseArgs();
 
   if (args.isCurrent) {
     const entries = getEntriesForPlatformArch(args.platformArch);

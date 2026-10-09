@@ -1,38 +1,26 @@
-export type Platform = "darwin" | "win32" | "linux";
+export type Platform = "win32" | "darwin" | "linux";
 
-/**
- * Detects the current platform using Electron when available,
- * falling back to user agent detection.
- */
-export function getPlatform(): Platform {
-  // Try Electron API first
-  if (typeof window !== "undefined" && window.electronAPI?.getPlatform) {
-    const platform = window.electronAPI.getPlatform();
-    if (platform === "darwin" || platform === "win32" || platform === "linux") {
-      return platform;
-    }
-  }
+// The renderer has no access to process.platform, so derive it from the user agent.
+// In the main process (or anywhere navigator is missing) Windows is assumed, since this
+// build only ships Windows binaries.
+function detectPlatform(): Platform {
+  if (typeof navigator === "undefined") return "win32";
 
-  // Fallback to user agent detection
-  if (typeof navigator !== "undefined") {
-    const ua = navigator.userAgent.toLowerCase();
-    if (ua.includes("mac")) return "darwin";
-    if (ua.includes("win")) return "win32";
-    if (ua.includes("linux")) return "linux";
-  }
-
-  // Default to darwin
-  return "darwin";
+  const ua = `${navigator.userAgent || ""} ${navigator.platform || ""}`.toLowerCase();
+  if (ua.includes("mac")) return "darwin";
+  if (ua.includes("linux") || ua.includes("x11")) return "linux";
+  return "win32";
 }
 
-/**
- * Cached platform value for performance
- */
 let cachedPlatform: Platform | null = null;
 
-export function getCachedPlatform(): Platform {
+export function getPlatform(): Platform {
   if (cachedPlatform === null) {
-    cachedPlatform = getPlatform();
+    cachedPlatform = detectPlatform();
   }
   return cachedPlatform;
+}
+
+export function getCachedPlatform(): Platform {
+  return getPlatform();
 }

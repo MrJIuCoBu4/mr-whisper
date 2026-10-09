@@ -29,7 +29,7 @@ const FLOATING_OVERLAY_TYPE =
       : "normal";
 
 const WINDOW_SIZES = {
-  BASE: { width: 96, height: 96 },
+  BASE: { width: 200, height: 80 },
   WITH_MENU: { width: 240, height: 280 },
   WITH_TOAST: { width: 400, height: 500 },
   EXPANDED: { width: 400, height: 500 },
@@ -44,12 +44,13 @@ const MAIN_WINDOW_CONFIG = {
     preload: path.join(__dirname, "..", "..", "preload.js"),
     nodeIntegration: false,
     contextIsolation: true,
-    sandbox: true,
+    sandbox: false,
   },
   frame: false,
   alwaysOnTop: true,
   resizable: false,
   transparent: true,
+  backgroundColor: "#00000000",
   show: false,
   skipTaskbar: true,
   focusable: false,
@@ -58,6 +59,30 @@ const MAIN_WINDOW_CONFIG = {
   hasShadow: false,
   acceptsFirstMouse: true,
   type: MAIN_OVERLAY_TYPE,
+};
+
+const SETTINGS_WINDOW_CONFIG = {
+  width: 400,
+  height: 460,
+  backgroundColor: "#ffffff",
+  webPreferences: {
+    preload: path.join(__dirname, "..", "..", "preload.js"),
+    nodeIntegration: false,
+    contextIsolation: true,
+    sandbox: false,
+    spellcheck: false,
+  },
+  title: "Настройки",
+  resizable: false,
+  show: false,
+  frame: false,
+  autoHideMenuBar: true,
+  minimizable: false,
+  maximizable: false,
+  closable: true,
+  skipTaskbar: false,
+  alwaysOnTop: false,
+  type: "normal",
 };
 
 // Control panel window configuration
@@ -162,8 +187,9 @@ class WindowPositionUtil {
       x = workArea.x + MARGIN;
       y = Math.max(0, workArea.y + workArea.height - height - MARGIN);
     } else if (position === "center") {
+      const TASKBAR_GAP = 10;
       x = Math.round(workArea.x + (workArea.width - width) / 2);
-      y = Math.max(0, workArea.y + workArea.height - height - MARGIN);
+      y = Math.max(0, workArea.y + workArea.height - height - TASKBAR_GAP);
     } else {
       // bottom-right (default)
       x = Math.max(0, workArea.x + workArea.width - width - MARGIN);
@@ -260,6 +286,7 @@ const AGENT_OVERLAY_CONFIG = {
 
 module.exports = {
   MAIN_WINDOW_CONFIG,
+  SETTINGS_WINDOW_CONFIG,
   CONTROL_PANEL_CONFIG,
   AGENT_OVERLAY_CONFIG,
   NOTIFICATION_WINDOW_CONFIG,

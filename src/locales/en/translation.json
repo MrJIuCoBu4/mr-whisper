@@ -1,5 +1,13 @@
 {
   "settings": {
+    "title": "Settings",
+    "hotkey": "Hotkey",
+    "microphone": "Microphone",
+    "save": "Save",
+    "saving": "Saving…",
+    "saved": "Saved",
+    "close": "Close",
+    "saveError": "Failed to save",
     "language": {
       "sectionTitle": "Language",
       "sectionDescription": "Set interface and transcription languages independently",
@@ -25,6 +33,24 @@
         "title": "Identify and label speakers",
         "description": "When off, transcripts show \"You\" and \"Others\""
       }
+    }
+  },
+  "overlay": {
+    "clickToRecord": "Click to record",
+    "clickToStop": "Click to stop",
+    "copiedToClipboard": "Text copied to clipboard",
+    "transcribing": "Transcribing…",
+    "pasting": "Pasting…",
+    "pastingFormatted": "Pasting…",
+    "noSpeech": "No speech detected",
+    "errors": {
+      "microphone": "Microphone error",
+      "transcription": "Transcription error",
+      "noAudio": "No audio captured — hold the hotkey longer",
+      "noSpeech": "No speech detected",
+      "micAccess": "Could not access microphone",
+      "modelNotConfigured": "Whisper model not configured",
+      "transcriptionFailed": "Transcription failed"
     }
   },
   "tray": {

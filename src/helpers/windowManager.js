@@ -9,6 +9,7 @@ const { i18nMain } = require("./i18nMain");
 const { DEV_SERVER_PORT } = DevServerManager;
 const {
   MAIN_WINDOW_CONFIG,
+  SETTINGS_WINDOW_CONFIG,
   CONTROL_PANEL_CONFIG,
   AGENT_OVERLAY_CONFIG,
   NOTIFICATION_WINDOW_CONFIG,
@@ -21,11 +22,15 @@ const {
 class WindowManager {
   constructor() {
     this.mainWindow = null;
+    this.settingsWindow = null;
     this.controlPanelWindow = null;
     this.agentWindow = null;
     this.notificationWindow = null;
     this._notificationTimeout = null;
     this.transcriptionPreviewWindow = null;
+    this._transcriptionPreviewHideTimer = null;
+    this._transcriptionPreviewText = "";
+    this._transcriptionPreviewAutoHideMs = 8000;
     this.updateNotificationWindow = null;
     this._updateNotificationDismissed = false;
     this.notificationPrefs = {
@@ -44,7 +49,7 @@ class WindowManager {
     this._cachedActivationMode = "tap";
     this._floatingIconAutoHide = false;
     this._agentAnimationState = null;
-    this._panelStartPosition = "bottom-right";
+    this._panelStartPosition = "center";
     this._isDictatingToggle = false;
     this._pendingMeetingNoteNavigation = null;
 
@@ -54,9 +59,15 @@ class WindowManager {
     });
   }
 
+  _getOverlayDisplay() {
+    if (this._panelStartPosition === "center") {
+      return screen.getPrimaryDisplay();
+    }
+    return screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+  }
+
   async createMainWindow() {
-    const cursorPos = screen.getCursorScreenPoint();
-    const display = screen.getDisplayNearestPoint(cursorPos);
+    const display = this._getOverlayDisplay();
     const position = WindowPositionUtil.getMainWindowPosition(
       display,
       null,
@@ -103,7 +114,6 @@ class WindowManager {
     await this.loadMainWindow();
     await this.initializeHotkey();
     this.dragManager.setTargetWindow(this.mainWindow);
-    MenuManager.setupMainMenu(() => this.openSettings());
   }
 
   setMainWindowInteractivity(shouldCapture) {
@@ -183,22 +193,15 @@ class WindowManager {
     return { success: true, bounds: { x: newX, y: newY, ...newSize } };
   }
 
-  async loadWindowContent(window, isControlPanel = false, isAgent = false) {
+  async loadWindowContent(window, windowType = "main") {
     if (process.env.NODE_ENV === "development") {
-      let appUrl = DevServerManager.getAppUrl(isControlPanel);
-      if (isAgent) {
-        appUrl = `${DevServerManager.getAppUrl(false)}?agent=true`;
-      }
+      const appUrl = DevServerManager.getAppUrl(windowType);
       await DevServerManager.waitForDevServer();
       await window.loadURL(appUrl);
     } else {
-      const fileInfo = DevServerManager.getAppFilePath(isControlPanel);
+      const fileInfo = DevServerManager.getAppFilePath(windowType);
       if (!fileInfo) {
         throw new Error("Failed to get app file path");
-      }
-
-      if (isAgent) {
-        fileInfo.query = { agent: "true" };
       }
 
       const fs = require("fs");
@@ -211,7 +214,7 @@ class WindowManager {
   }
 
   async loadMainWindow() {
-    await this.loadWindowContent(this.mainWindow, false);
+    await this.loadWindowContent(this.mainWindow, "main");
   }
 
   createHotkeyCallback() {
@@ -394,27 +397,14 @@ class WindowManager {
       return;
     }
 
-    const MIN_HOLD_DURATION_MS = 150;
-    const downTime = Date.now();
-
     this.showDictationPanel();
 
     this.winPushState = {
       active: true,
-      downTime,
-      isRecording: false,
+      isRecording: true,
     };
 
-    setTimeout(() => {
-      if (!this.winPushState || this.winPushState.downTime !== downTime) {
-        return;
-      }
-
-      if (!this.winPushState.isRecording) {
-        this.winPushState.isRecording = true;
-        this.sendStartDictation();
-      }
-    }, MIN_HOLD_DURATION_MS);
+    this.sendStartDictation();
   }
 
   handleWindowsPushKeyUp() {
@@ -427,9 +417,9 @@ class WindowManager {
 
     if (wasRecording) {
       this.sendStopDictation();
-    } else {
-      this.hideDictationPanel();
     }
+    this.showDictationPanel();
+    this.enforceMainWindowOnTop();
   }
 
   resetWindowsPushState() {
@@ -674,7 +664,7 @@ class WindowManager {
   }
 
   async loadControlPanel() {
-    await this.loadWindowContent(this.controlPanelWindow, true);
+    await this.loadWindowContent(this.controlPanelWindow, "panel");
   }
 
   async createAgentWindow() {
@@ -696,7 +686,7 @@ class WindowManager {
       this.agentWindow = null;
     });
 
-    await this.loadWindowContent(this.agentWindow, false, true);
+    await this.loadWindowContent(this.agentWindow, "main");
   }
 
   toggleAgentOverlay() {
@@ -764,6 +754,7 @@ class WindowManager {
 
     this.transcriptionPreviewWindow.on("closed", () => {
       this.transcriptionPreviewWindow = null;
+      this._clearTranscriptionPreviewHideTimer();
     });
 
     if (process.env.NODE_ENV === "development") {
@@ -779,26 +770,95 @@ class WindowManager {
     }
   }
 
+  // Sits directly above the dictation panel, which lives at the bottom of the screen.
+  // Falls back to bottom-center of the cursor's screen when the panel is not showing.
+  _getTranscriptionPreviewBounds(
+    width = TRANSCRIPTION_PREVIEW_CONFIG.width,
+    height = TRANSCRIPTION_PREVIEW_CONFIG.height
+  ) {
+    const GAP = 8;
+    const main = this.mainWindow;
+
+    if (main && !main.isDestroyed() && main.isVisible()) {
+      const panel = main.getBounds();
+      const display = screen.getDisplayNearestPoint({
+        x: panel.x + Math.round(panel.width / 2),
+        y: panel.y + Math.round(panel.height / 2),
+      });
+      const workArea = display.workArea || display.bounds;
+      const x = Math.round(panel.x + (panel.width - width) / 2);
+      const y = panel.y - height - GAP;
+
+      return {
+        x: Math.max(workArea.x, Math.min(x, workArea.x + workArea.width - width)),
+        y: Math.max(workArea.y, Math.min(y, workArea.y + workArea.height - height)),
+        width,
+        height,
+      };
+    }
+
+    const BOTTOM_MARGIN = 24;
+    const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+    const workArea = display.workArea || display.bounds;
+
+    return {
+      x: Math.round(workArea.x + (workArea.width - width) / 2),
+      y: Math.round(workArea.y + workArea.height - height - BOTTOM_MARGIN),
+      width,
+      height,
+    };
+  }
+
+  _clearTranscriptionPreviewHideTimer() {
+    if (this._transcriptionPreviewHideTimer) {
+      clearTimeout(this._transcriptionPreviewHideTimer);
+      this._transcriptionPreviewHideTimer = null;
+    }
+    // The short delay before the window actually hides has to be cancellable as well,
+    // otherwise a preview shown right after it would be hidden again immediately.
+    if (this._transcriptionPreviewHideAnimTimer) {
+      clearTimeout(this._transcriptionPreviewHideAnimTimer);
+      this._transcriptionPreviewHideAnimTimer = null;
+    }
+  }
+
   async showTranscriptionPreview(text) {
+    this._transcriptionPreviewText = typeof text === "string" ? text : "";
+
     await this.ensureTranscriptionPreviewWindow();
 
     if (!this.transcriptionPreviewWindow || this.transcriptionPreviewWindow.isDestroyed()) return;
 
-    const mainBounds =
-      this.mainWindow && !this.mainWindow.isDestroyed() ? this.mainWindow.getBounds() : null;
+    this.transcriptionPreviewWindow.setBounds(this._getTranscriptionPreviewBounds());
 
-    if (mainBounds) {
-      const display = screen.getDisplayNearestPoint({ x: mainBounds.x, y: mainBounds.y });
-      const position = WindowPositionUtil.getTranscriptionPreviewPosition(display, mainBounds, {
-        width: TRANSCRIPTION_PREVIEW_CONFIG.width,
-        height: TRANSCRIPTION_PREVIEW_CONFIG.height,
-      });
-      this.transcriptionPreviewWindow.setBounds(position);
-    }
-
-    this.transcriptionPreviewWindow.webContents.send("preview-text", text);
+    // Show first: the renderer only gets animation frames and resize events once visible.
     this.transcriptionPreviewWindow.showInactive();
     WindowPositionUtil.setupAlwaysOnTop(this.transcriptionPreviewWindow);
+    this.transcriptionPreviewWindow.webContents.send(
+      "preview-text",
+      this._transcriptionPreviewText
+    );
+
+    // Auto-hide is driven from the main process — a hidden renderer throttles its own timers,
+    // and this must also re-arm on every new utterance.
+    this._clearTranscriptionPreviewHideTimer();
+    this._transcriptionPreviewHideTimer = setTimeout(() => {
+      this._transcriptionPreviewHideTimer = null;
+      this.hideTranscriptionPreview();
+    }, this._transcriptionPreviewAutoHideMs);
+  }
+
+  getTranscriptionPreviewAutoHideMs() {
+    return this._transcriptionPreviewAutoHideMs;
+  }
+
+  getTranscriptionPreviewState() {
+    const win = this.transcriptionPreviewWindow;
+    return {
+      text: this._transcriptionPreviewText,
+      autoHideMs: this._transcriptionPreviewAutoHideMs,
+      visible: !!win && !win.isDestroyed() && win.isVisible(),
+    };
   }
 
   appendTranscriptionPreview(text) {
@@ -821,10 +881,13 @@ class WindowManager {
   }
 
   hideTranscriptionPreview() {
+    this._clearTranscriptionPreviewHideTimer();
+
     if (!this.transcriptionPreviewWindow || this.transcriptionPreviewWindow.isDestroyed()) return;
 
     this.transcriptionPreviewWindow.webContents.send("preview-hide");
-    setTimeout(() => {
+    this._transcriptionPreviewHideAnimTimer = setTimeout(() => {
+      this._transcriptionPreviewHideAnimTimer = null;
       if (this.transcriptionPreviewWindow && !this.transcriptionPreviewWindow.isDestroyed()) {
         this.transcriptionPreviewWindow.hide();
       }
@@ -845,15 +908,7 @@ class WindowManager {
       Math.min(Math.round(height), TRANSCRIPTION_PREVIEW_SIZE_LIMITS.maxHeight)
     );
 
-    const anchorBounds =
-      this.mainWindow && !this.mainWindow.isDestroyed()
-        ? this.mainWindow.getBounds()
-        : this.transcriptionPreviewWindow.getBounds();
-    const display = screen.getDisplayNearestPoint({ x: anchorBounds.x, y: anchorBounds.y });
-    const bounds = WindowPositionUtil.getTranscriptionPreviewPosition(display, anchorBounds, {
-      width: targetWidth,
-      height: targetHeight,
-    });
+    const bounds = this._getTranscriptionPreviewBounds(targetWidth, targetHeight);
 
     const currentBounds = this.transcriptionPreviewWindow.getBounds();
     if (
@@ -987,19 +1042,20 @@ class WindowManager {
   _repositionToCursorDisplay() {
     if (!this.mainWindow || this.mainWindow.isDestroyed()) return;
 
-    const cursorPos = screen.getCursorScreenPoint();
-    const cursorDisplay = screen.getDisplayNearestPoint(cursorPos);
-
     const currentBounds = this.mainWindow.getBounds();
-    const currentDisplay = screen.getDisplayNearestPoint({
-      x: currentBounds.x + currentBounds.width / 2,
-      y: currentBounds.y + currentBounds.height / 2,
-    });
+    const targetDisplay = this._getOverlayDisplay();
 
-    if (currentDisplay.id === cursorDisplay.id) return;
+    if (this._panelStartPosition !== "center") {
+      const cursorDisplay = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+      const currentDisplay = screen.getDisplayNearestPoint({
+        x: currentBounds.x + currentBounds.width / 2,
+        y: currentBounds.y + currentBounds.height / 2,
+      });
+      if (currentDisplay.id === cursorDisplay.id) return;
+    }
 
     const newPos = WindowPositionUtil.getMainWindowPosition(
-      cursorDisplay,
+      targetDisplay,
       { width: currentBounds.width, height: currentBounds.height },
       this._panelStartPosition
     );
@@ -1028,6 +1084,7 @@ class WindowManager {
       if (focus) {
         this.mainWindow.focus();
       }
+      this.enforceMainWindowOnTop();
     }
   }
 
@@ -1095,6 +1152,10 @@ class WindowManager {
     });
 
     this.mainWindow.on("focus", () => {
+      this.enforceMainWindowOnTop();
+    });
+
+    this.mainWindow.on("blur", () => {
       this.enforceMainWindowOnTop();
     });
 
@@ -1362,11 +1423,33 @@ class WindowManager {
     }
   }
 
-  async openSettings() {
-    await this.createControlPanelWindow();
-    if (this.controlPanelWindow && !this.controlPanelWindow.isDestroyed()) {
-      this.controlPanelWindow.webContents.send("show-settings");
+  async createSettingsWindow() {
+    if (this.settingsWindow && !this.settingsWindow.isDestroyed()) {
+      return this.settingsWindow;
     }
+
+    this.settingsWindow = new BrowserWindow(SETTINGS_WINDOW_CONFIG);
+    this.settingsWindow.setMenu(null);
+    this.settingsWindow.on("closed", () => {
+      this.settingsWindow = null;
+    });
+    await this.loadWindowContent(this.settingsWindow, "settings");
+    return this.settingsWindow;
+  }
+
+  async showSettingsWindow() {
+    await this.createSettingsWindow();
+    if (this.settingsWindow && !this.settingsWindow.isDestroyed()) {
+      if (this.settingsWindow.isMinimized()) {
+        this.settingsWindow.restore();
+      }
+      this.settingsWindow.show();
+      this.settingsWindow.focus();
+    }
+  }
+
+  async openSettings() {
+    await this.showSettingsWindow();
   }
 
   showLoadFailureDialog(windowName, errorCode, errorDescription, validatedURL) {

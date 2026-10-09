@@ -19,6 +19,7 @@ class WindowsKeyManager extends EventEmitter {
     this.hasReportedError = false;
     this.currentKey = null;
     this.isReady = false;
+    this.stoppingIntentionally = false;
   }
 
   handleOutputLine(line, key) {
@@ -128,7 +129,9 @@ class WindowsKeyManager extends EventEmitter {
         this.process = null;
         this.isReady = false;
       }
-      if (code !== 0) {
+      const intentional = this.stoppingIntentionally;
+      this.stoppingIntentionally = false;
+      if (code !== 0 && !intentional) {
         this.reportError(
           new Error(
             `Windows key listener exited with code ${code ?? "null"} signal ${signal ?? "null"}`
@@ -143,6 +146,7 @@ class WindowsKeyManager extends EventEmitter {
    */
   stop() {
     if (this.process) {
+      this.stoppingIntentionally = true;
       debugLogger.debug("[WindowsKeyManager] Stopping key listener");
       try {
         this.process.kill();

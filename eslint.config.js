@@ -9,6 +9,7 @@ module.exports = [
       "src/dist/**",
       "*.min.js",
       "build/**",
+      "tools/fw-server/.venv/**", // bundled Python environment
       "src/**", // src has its own config
     ],
   },

@@ -112,6 +112,16 @@ async function downloadBinary(platformArch, config, release, isForce = false) {
 }
 
 async function main() {
+  const args = parseArgs();
+
+  if (args.isCurrent && BINARIES[args.platformArch]) {
+    const outputPath = path.join(BIN_DIR, BINARIES[args.platformArch].outputName);
+    if (fs.existsSync(outputPath) && !args.isForce) {
+      console.log(`[whisper-server] ${args.platformArch}: Already exists at ${outputPath}`);
+      return;
+    }
+  }
+
   if (VERSION_OVERRIDE) {
     console.log(`\n[whisper-server] Using pinned version: ${VERSION_OVERRIDE}`);
   } else {
@@ -129,8 +139,6 @@ async function main() {
   console.log(`\nDownloading whisper-server binaries (${release.tag})...\n`);
 
   fs.mkdirSync(BIN_DIR, { recursive: true });
-
-  const args = parseArgs();
 
   if (args.isCurrent) {
     if (!BINARIES[args.platformArch]) {

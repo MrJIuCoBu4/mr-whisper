@@ -54,37 +54,36 @@ class DevServerManager {
     return false;
   }
 
-  static getAppUrl(isControlPanel = false) {
+  static getAppUrl(windowType = "main") {
     if (process.env.NODE_ENV === "development") {
-      return isControlPanel ? `${DEV_SERVER_URL}?panel=true` : DEV_SERVER_URL;
-    } else {
-      // For production, return null - caller should use loadFile() instead
-      return null;
+      if (windowType === "settings") return `${DEV_SERVER_URL}?settings=true`;
+      if (windowType === "panel") return `${DEV_SERVER_URL}?panel=true`;
+      return DEV_SERVER_URL;
     }
+    return null;
   }
 
   /**
-   * Get the path to the index.html file for production builds.
-   * In Electron 36+, loadFile() is preferred over loadURL() with file:// protocol.
-   * @param {boolean} isControlPanel - Whether this is for the control panel
-   * @returns {{ path: string, query: object } | null} - Path info for loadFile() or null for dev
+   * @param {"main"|"settings"|"panel"} windowType
    */
-  static getAppFilePath(isControlPanel = false) {
+  static getAppFilePath(windowType = "main") {
     if (process.env.NODE_ENV === "development") {
-      return null; // Use getAppUrl() for dev server
+      return null;
     }
 
     const path = require("path");
     const { app } = require("electron");
-
-    // In packaged app, files are relative to app.getAppPath()
     const appPath = app.getAppPath();
     const htmlPath = path.join(appPath, "src", "dist", "index.html");
 
-    return {
-      path: htmlPath,
-      query: isControlPanel ? { panel: "true" } : {},
-    };
+    const query =
+      windowType === "settings"
+        ? { settings: "true" }
+        : windowType === "panel"
+          ? { panel: "true" }
+          : {};
+
+    return { path: htmlPath, query };
   }
 }
 
