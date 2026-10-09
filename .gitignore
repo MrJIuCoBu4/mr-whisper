@@ -322,7 +322,7 @@ src/assets/Assets.car
 # Local recognition engines and models — gigabytes, never commit
 models/
 tools/fw-server/.venv/
-tools/fw-server/model/
+tools/fw-server/model*/
 
 # Machine-specific settings (absolute model paths, hotkey)
 config.json
